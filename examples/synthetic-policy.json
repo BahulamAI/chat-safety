@@ -1,0 +1,178 @@
+{
+  "version": "synthetic-eval/2",
+  "mode": "enforce",
+  "required_categories": [
+    "child_exploitation",
+    "nonconsensual_intimate_content",
+    "violence_weapons",
+    "fraud_theft",
+    "unauthorized_intrusion",
+    "self_harm",
+    "harassment_hate",
+    "privacy_exfiltration",
+    "prompt_injection"
+  ],
+  "thresholds": {
+    "input": {
+      "child_exploitation": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "nonconsensual_intimate_content": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "violence_weapons": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "fraud_theft": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "unauthorized_intrusion": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "self_harm": {
+        "review_at": 0.35,
+        "refuse_at": 0.85,
+        "middle_action": "constrain",
+        "upper_action": "constrain"
+      },
+      "harassment_hate": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "privacy_exfiltration": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "prompt_injection": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      }
+    },
+    "tool_proposal": {
+      "child_exploitation": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "nonconsensual_intimate_content": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "violence_weapons": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "fraud_theft": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "unauthorized_intrusion": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "self_harm": {
+        "review_at": 0.35,
+        "refuse_at": 0.85,
+        "middle_action": "constrain",
+        "upper_action": "constrain"
+      },
+      "harassment_hate": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "privacy_exfiltration": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "prompt_injection": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      }
+    },
+    "tool_result": {
+      "child_exploitation": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "nonconsensual_intimate_content": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "violence_weapons": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "fraud_theft": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "unauthorized_intrusion": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "self_harm": {
+        "review_at": 0.35,
+        "refuse_at": 0.85,
+        "middle_action": "constrain",
+        "upper_action": "constrain"
+      },
+      "harassment_hate": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "privacy_exfiltration": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "prompt_injection": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      }
+    },
+    "output_release": {
+      "child_exploitation": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "nonconsensual_intimate_content": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "violence_weapons": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "fraud_theft": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "unauthorized_intrusion": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "self_harm": {
+        "review_at": 0.35,
+        "refuse_at": 0.85,
+        "middle_action": "constrain",
+        "upper_action": "constrain"
+      },
+      "harassment_hate": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "privacy_exfiltration": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      },
+      "prompt_injection": {
+        "review_at": 0.35,
+        "refuse_at": 0.85
+      }
+    }
+  },
+  "note": "Synthetic demonstration thresholds only; never use in production."
+}

@@ -1,0 +1,72 @@
+{
+  "schema": "chat-safety.policy/1",
+  "version": "synthetic-runtime/1",
+  "mode": "enforce",
+  "note": "Synthetic illustration only. Questions and thresholds require review and calibration before use.",
+  "required_categories": ["self_harm"],
+  "optional_categories": ["medical_advice"],
+  "categories": {
+    "self_harm": {
+      "description": "Distress or requests requiring a supportive self-harm response.",
+      "message_question": {
+        "instructions": "Assess the latest content in context for a self-harm safety response.",
+        "true_criteria": "The latest content expresses personal distress or requests self-harm instructions requiring support.",
+        "false_criteria": "No personal safety signal; neutral discussion or unrelated request."
+      },
+      "session_question": {
+        "instructions": "Assess the bounded conversation trajectory, including earlier assistant and tool events, for a self-harm safety response.",
+        "true_criteria": "The conversation trajectory indicates escalating distress or requests for self-harm instructions requiring support.",
+        "false_criteria": "The trajectory does not indicate a current self-harm safety concern."
+      }
+    },
+    "medical_advice": {
+      "description": "Unsafe personalized medical guidance; general health education remains permitted.",
+      "message_question": {
+        "instructions": "Assess whether the latest content gives or seeks unsafe individualized medical instructions.",
+        "true_criteria": "The content gives or seeks individualized diagnosis, treatment, or dosing guidance without needed clinical context.",
+        "false_criteria": "General education, clinical research, evidence review, or referral to qualified care."
+      },
+      "session_question": {
+        "instructions": "Assess whether the conversation trajectory is drifting toward unsafe personalized medical instructions.",
+        "true_criteria": "The sequence of user, assistant, or tool events is converging on individualized diagnosis, treatment, or dosing guidance.",
+        "false_criteria": "The sequence remains general education, research, or safe support."
+      }
+    }
+  },
+  "thresholds": {
+    "input": {
+      "self_harm": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "constrain", "upper_action": "constrain"},
+      "medical_advice": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"}
+    },
+    "tool_proposal": {
+      "self_harm": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"},
+      "medical_advice": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"}
+    },
+    "tool_result": {
+      "self_harm": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"},
+      "medical_advice": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"}
+    },
+    "output_release": {
+      "self_harm": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "constrain", "upper_action": "constrain"},
+      "medical_advice": {"review_at": 0.4, "refuse_at": 0.9, "middle_action": "review"}
+    }
+  },
+  "session_thresholds": {
+    "input": {
+      "self_harm": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "constrain", "upper_action": "constrain"},
+      "medical_advice": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"}
+    },
+    "tool_proposal": {
+      "self_harm": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"},
+      "medical_advice": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"}
+    },
+    "tool_result": {
+      "self_harm": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"},
+      "medical_advice": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"}
+    },
+    "output_release": {
+      "self_harm": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "constrain", "upper_action": "constrain"},
+      "medical_advice": {"review_at": 0.35, "refuse_at": 0.85, "middle_action": "review"}
+    }
+  }
+}
