@@ -42,6 +42,13 @@ families = await assessor.assess_families(request, top_k_families=1)
 detail = await assessor.assess_subfamilies(request, family_ids=("health",))
 ```
 
+Both Jev adapters also accept `model=` and `endpoint=` from the trusted caller.
+For example, an application can pass its authenticated gateway's
+`https://gateway.example/v1/decisions` endpoint and a gateway service token as
+`api_key`. The gateway must implement the same Decisions request/response
+contract. The package does not choose a gateway from environment variables or
+fall back to a direct provider when that gateway fails.
+
 `assess_families` evaluates every family in the configured registry. Its result contains all `scores` plus up to N `top_families` **per requested scope**. N greater than the registry size returns all families; rankings can include low scores and are not declarations of harm. Scores are independent criterion probabilities and do not sum to one. A mathematical intersection of leading families does not establish chat intent. The caller can inspect every score, including threshold crossings outside the displayed top N. Sorting is deterministic for the returned scores; Jev inference is not guaranteed to repeat exactly.
 
 `assess_subfamilies` runs only when the caller invokes it. The caller selects one or more registered parents based on its own thresholds; the framework evaluates their children without changing the broad scores. There are no automatic follow-up calls, nudges, refusals, or allow decisions. The caller may keep expansion thresholds and trusted nudge templates in its own configuration. See [family_nudge.py](examples/family_nudge.py) for a runnable offline example that makes two explicit assessments and constructs a caller-owned nudge from the child results.

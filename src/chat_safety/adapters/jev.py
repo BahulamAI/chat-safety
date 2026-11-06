@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from types import MappingProxyType
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from ..models import AssessmentScope, Category, Evaluation, SafetyInput, Signal
 from ..questions import BinaryQuestion as NoulQuestion
@@ -15,6 +16,19 @@ from ..questions import BinaryQuestion as NoulQuestion
 
 class JevResponseError(ValueError):
     pass
+
+
+def _validate_endpoint(endpoint: str) -> str:
+    """Accept a trusted caller's Decisions endpoint, without URL credentials."""
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError("a Decisions endpoint is required")
+    endpoint = endpoint.strip()
+    parsed = urlsplit(endpoint)
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment):
+        raise ValueError("invalid Decisions endpoint")
+    return endpoint
 
 
 async def _post_decisions(*, endpoint, body, api_key, timeout_seconds, max_response_bytes, client):
@@ -68,6 +82,7 @@ class JevEvaluator:
         session_questions: Mapping[Category, NoulQuestion] | None = None,
         mandatory_categories: frozenset[Category] | None = None,
         model: str = "typesafe/jev-1.14",
+        endpoint: str = ENDPOINT,
         timeout_seconds: float = 8.0,
         max_response_bytes: int = 65_536,
         client: Any = None,
@@ -83,6 +98,7 @@ class JevEvaluator:
         if not self.mandatory_categories or not self.mandatory_categories.issubset(self.questions):
             raise ValueError("mandatory categories must be a nonempty subset of configured questions")
         self.model = model
+        self.endpoint = _validate_endpoint(endpoint)
         self.timeout_seconds = timeout_seconds
         self.max_response_bytes = max_response_bytes
         self._client = client
@@ -119,7 +135,7 @@ class JevEvaluator:
             },
         }
         payload = await _post_decisions(
-            endpoint=self.ENDPOINT, body=body, api_key=self._api_key,
+            endpoint=self.endpoint, body=body, api_key=self._api_key,
             timeout_seconds=self.timeout_seconds, max_response_bytes=self.max_response_bytes,
             client=self._client,
         )

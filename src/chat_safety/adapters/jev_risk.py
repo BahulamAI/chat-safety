@@ -3,11 +3,12 @@
 import math
 
 from ..assessment import AssessmentInput, RiskEvaluation, RiskQuestion, RiskScore
-from .jev import JevEvaluator, _parse_noul_answers, _post_decisions
+from .jev import JevEvaluator, _parse_noul_answers, _post_decisions, _validate_endpoint
 
 
 class JevRiskEvaluator:
     def __init__(self, *, api_key: str, model: str = "typesafe/jev-1.14",
+                 endpoint: str = JevEvaluator.ENDPOINT,
                  timeout_seconds: float = 8.0, max_response_bytes: int = 262_144,
                  client=None):
         if (not api_key or not model or not math.isfinite(timeout_seconds)
@@ -15,6 +16,7 @@ class JevRiskEvaluator:
             raise ValueError("Jev credentials, model, and positive limits are required")
         self._api_key = api_key
         self.model = model
+        self.endpoint = _validate_endpoint(endpoint)
         self.timeout_seconds = timeout_seconds
         self.max_response_bytes = max_response_bytes
         self._client = client
@@ -30,7 +32,7 @@ class JevRiskEvaluator:
             for name, item in named.items()
         }}
         payload = await _post_decisions(
-            endpoint=JevEvaluator.ENDPOINT, body=body, api_key=self._api_key,
+            endpoint=self.endpoint, body=body, api_key=self._api_key,
             timeout_seconds=self.timeout_seconds, max_response_bytes=self.max_response_bytes,
             client=self._client,
         )

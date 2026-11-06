@@ -42,6 +42,42 @@ class JevResponseTests(unittest.TestCase):
 
 
 class JevRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_caller_gateway_and_model_are_used_without_direct_provider_fallback(self):
+        from chat_safety import AssessmentInput, RiskAssessor, load_risk_registry
+        from chat_safety.adapters.jev_risk import JevRiskEvaluator
+        from pathlib import Path
+
+        endpoint = "http://gateway.internal/v1/decisions"
+        model = "typesafe/jev-configured"
+        seen = []
+
+        def respond(request):
+            body = json.loads(request.content)
+            seen.append((str(request.url), request.headers["Authorization"], body["model"]))
+            return httpx.Response(200, json={"model": model, "answers": {
+                name: {"type": "noul", "noul": 0.1} for name in body["questions"]
+            }})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            question = NoulQuestion("Evaluate text", "Concern", "No concern")
+            evaluator = JevEvaluator(api_key="svc_test", endpoint=endpoint, model=model,
+                                     client=client, questions={Category.FRAUD_THEFT: question})
+            await evaluator.evaluate(SafetyInput("r", "v1", Stage.INPUT, "chat", "actor", "Text"))
+            registry = load_risk_registry(Path(__file__).parents[1] / "examples/risk-registry.json")
+            evaluator = JevRiskEvaluator(api_key="svc_test", endpoint=endpoint, model=model, client=client)
+            result = await RiskAssessor(registry, evaluator).assess_families(
+                AssessmentInput("r", registry.version, Stage.INPUT, "Text"))
+            self.assertEqual(result.model_version, model)
+        self.assertEqual(seen, [(endpoint, "Bearer svc_test", model)] * 2)
+
+    def test_invalid_gateway_endpoints_are_rejected(self):
+        from chat_safety.adapters.jev_risk import JevRiskEvaluator
+
+        for endpoint in ("", "file:///tmp/decisions", "https://user:password@gateway/decisions",
+                         "https://gateway/decisions?token=secret", "https://gateway/decisions#part"):
+            with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
+                JevRiskEvaluator(api_key="svc_test", endpoint=endpoint)
+
     async def test_request_is_bounded_state_with_named_noul_question(self):
         seen = {}
 
