@@ -1,133 +1,236 @@
 # chat-safety
 
-`chat-safety` is an early-stage Python framework for typed risk assessments in conversational applications. The caller supplies content, context, and a risk registry; the framework returns model evidence. The caller owns thresholds, subfamily follow-up calls, agent nudges, and chat actions. The first consumer is planned to be Bahulam under workspace PRD-118; the package design is in workspace PRD-119.
+Typed, provider-neutral risk assessments for conversational applications.
 
-## Status
+Give `chat-safety` your content, conversation context, and risk definitions. It returns structured scores for risk families and subfamilies, assessed at message or session scope. Your application decides how to use that evidence: guide an agent, request more detail, review a tool action, or assess a draft before releasing it.
 
-The primary API now supports configurable top-N family reporting, caller-defined family/subfamily criteria, explicit subfamily assessment calls, and separate message/session scores. It has offline and mocked-HTTP tests. The earlier `SafetyGate`, fixed `Category` vocabulary, JSON action policies, and action-based session tracker remain optional compatibility APIs. There are **no approved production thresholds**, Bahulam assessment/nudge hooks, durable session-store adapter, or published release. The Jev adapter follows OpenRouter's documented [Decisions API](https://openrouter.ai/blog/insights/what-is-jev/) shape; production privacy controls remain to be verified.
+**The primary API returns evidence, not permission to act.** It does not run tools, modify prompts, rewrite responses, block messages, or store conversations. Those controls belong to the application.
 
-## Package layout
+The package is alpha (`0.1.0a0`) and requires Python 3.10 or later. Its example criteria and thresholds are synthetic; they are not a calibrated production policy.
 
-| Module | Responsibility |
+## Install
+
+Install from a source checkout:
+
+```bash
+git clone https://github.com/BahulamAI/chat-safety.git
+cd chat-safety
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[jev]'
+```
+
+Use `pip install -e .` for the provider-neutral core without the optional HTTP dependency, or `pip install -e '.[dev]'` for development and tests. Pin a reviewed commit when integrating a source checkout into a deployed application.
+
+## Quick start without credentials
+
+From the repository root:
+
+```bash
+PYTHONPATH=src python examples/family_nudge.py
+```
+
+This offline example uses invented scores to demonstrate message and session assessment, configurable top-N reporting, an explicit subfamily follow-up, and application-owned guidance. It makes no network requests.
+
+The [example source](examples/family_nudge.py) also shows how to implement a custom evaluator. An evaluator implements `async evaluate(request, questions)` and returns a `RiskEvaluation` containing a `RiskScore` for every requested question, an evaluator name, and a model version.
+
+## Concepts
+
+| Concept | Meaning |
 | --- | --- |
-| `assessment.py` | Evidence-only input/result contracts, top-N rankings, and explicit family/subfamily calls |
-| `registry.py` | Caller-defined family IDs, subfamily IDs, questions, bounds, and reporting defaults |
-| `questions.py` | Provider-neutral binary question criteria |
-| `adapters/jev_risk.py` | Jev adapter for the dynamic family assessment API |
-| `models.py` | Stages, actions, risk tiers, input, signals, and decision types |
-| `context.py` | Reject oversize content or history without silent truncation |
-| `policy.py` | Versioned threshold bands supplied by the application |
-| `config.py` | Strict loader for caller-owned JSON policy and category questions |
-| `engine.py` | Hard rules, evaluator evidence, action composition, and safe fallback |
-| `adapters/jev.py` | OpenRouter Jev Decisions API client and strict response parsing |
-| `session.py` | Bounded session events, immutable state transitions, and durable-store interface |
-| `evaluation.py` | Offline metrics for labeled cases |
+| Stage | Where the content occurs: `input`, `tool_proposal`, `tool_result`, or `output_release` |
+| Scope | What is assessed: the latest `message`, or the supplied `session` trajectory |
+| Family | An application-defined risk area, such as `health` or `privacy` |
+| Subfamily | A more specific criterion within a family, such as `unauthorized_disclosure` |
+| Registry | Versioned family definitions, message/session questions, context limits, and reporting defaults |
+| Application policy | Thresholds and actions chosen by the caller; separate from the primary assessment API |
 
-## Family assessment and caller nudges
+A session is a scope, not a stage. An assistant draft can be assessed at `output_release` with both message and session scope. Sharing and export are not assessment stages; applications handle their access and privacy rules separately.
 
-Use [risk-registry.json](examples/risk-registry.json) as a synthetic configuration example. `reporting.top_k_families` defaults to 3 and accepts any positive integer. Each call may override it with 1 or N. Custom family and subfamily IDs are validated identifiers defined in this file; they do not require a package release. Each definition includes separate message and session questions. Descriptions are metadata; the question instructions and criteria carry the model-facing meaning. The framework validates contracts and bounds, without interpreting the subject matter itself.
+## Assess with Jev or a compatible gateway
+
+The included `JevRiskEvaluator` sends Decisions API requests. Pass the endpoint, model, and credential explicitly from trusted application configuration. A gateway must implement the same request/response contract; a generic chat-completions endpoint is not sufficient.
+
+The following example runs from the repository root after installation. Set `SAFETY_DECISIONS_ENDPOINT`, `SAFETY_MODEL`, and `SAFETY_API_KEY` through your application's configuration and secret management. These names are conventions for this example, not environment variables automatically read by the library.
 
 ```python
-from chat_safety import AssessmentInput, RiskAssessor, Stage, load_risk_registry
+import asyncio
+import json
+import os
+
+from chat_safety import (
+    AssessmentInput,
+    AssessmentScope,
+    AssessmentStatus,
+    RecentTurn,
+    RiskAssessor,
+    Stage,
+    load_risk_registry,
+)
 from chat_safety.adapters.jev_risk import JevRiskEvaluator
 
-registry = load_risk_registry("/trusted/config/risk-registry.json")
-assessor = RiskAssessor(registry, JevRiskEvaluator(api_key=key_from_secret_store))
-request = AssessmentInput(
-    request_id="event-8", registry_version=registry.version,
-    stage=Stage.INPUT, content=content_to_assess,
-)
-families = await assessor.assess_families(request, top_k_families=1)
-# The caller inspects status/scores and decides whether a second call is needed.
-detail = await assessor.assess_subfamilies(request, family_ids=("health",))
+
+async def main():
+    registry = load_risk_registry("examples/risk-registry.json")
+    evaluator = JevRiskEvaluator(
+        endpoint=os.environ["SAFETY_DECISIONS_ENDPOINT"],
+        model=os.environ["SAFETY_MODEL"],
+        api_key=os.environ["SAFETY_API_KEY"],
+        timeout_seconds=8.0,
+    )
+    assessor = RiskAssessor(registry, evaluator)
+    request = AssessmentInput(
+        request_id="event-2",
+        registry_version=registry.version,
+        stage=Stage.INPUT,
+        content="How should I compare the evidence?",
+        assessment_scopes=(AssessmentScope.MESSAGE, AssessmentScope.SESSION),
+        session_ref="conversation-1",
+        session_revision=1,
+        recent_turns=(
+            RecentTurn("user", "Explain how clinical studies compare treatments."),
+            RecentTurn("assistant", "We can compare study design and limitations."),
+        ),
+    )
+    result = await assessor.assess_families(request, top_k_families=3)
+    if result.status is not AssessmentStatus.COMPLETE:
+        # An unavailable assessment is not evidence of low risk.
+        # Your application chooses its retry, review, or fallback behavior.
+        print(result.error_code)
+        return
+    print(json.dumps(result.to_dict(), indent=2))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-Both Jev adapters also accept `model=` and `endpoint=` from the trusted caller.
-For example, an application can pass its authenticated gateway's
-`https://gateway.example/v1/decisions` endpoint and a gateway service token as
-`api_key`. The gateway must implement the same Decisions request/response
-contract. The package does not choose a gateway from environment variables or
-fall back to a direct provider when that gateway fails.
+For direct provider access, the adapter defaults to endpoint `https://openrouter.ai/api/alpha/decisions` and model `typesafe/jev-1.14`. You may override both as above. Calls send the supplied text and context to the configured endpoint. The library does not read deployment variables, discover credentials, or fall back from a gateway to a direct provider.
 
-`assess_families` evaluates every family in the configured registry. Its result contains all `scores` plus up to N `top_families` **per requested scope**. N greater than the registry size returns all families; rankings can include low scores and are not declarations of harm. Scores are independent criterion probabilities and do not sum to one. A mathematical intersection of leading families does not establish chat intent. The caller can inspect every score, including threshold crossings outside the displayed top N. Sorting is deterministic for the returned scores; Jev inference is not guaranteed to repeat exactly.
+## Define your risk registry
 
-`assess_subfamilies` runs only when the caller invokes it. The caller selects one or more registered parents based on its own thresholds; the framework evaluates their children without changing the broad scores. There are no automatic follow-up calls, nudges, refusals, or allow decisions. The caller may keep expansion thresholds and trusted nudge templates in its own configuration. See [family_nudge.py](examples/family_nudge.py) for a runnable offline example that makes two explicit assessments and constructs a caller-owned nudge from the child results.
+Start with [examples/risk-registry.json](examples/risk-registry.json). It contains four illustrative families: `health`, `privacy`, `system_integrity`, and `financial_harm`. It is intentionally small, not a universal safety taxonomy.
 
-Results include `status`, evaluator/model snapshot, registry version and fingerprint, input fingerprint, stage, assessed family IDs, scopes, and session reference/revision. Provider errors or invalid/missing scores return `status="unavailable"` with empty scores, never zero-risk evidence or a chat disposition. Invalid request/configuration arguments raise before the provider call. `result.to_dict()` is JSON-compatible and excludes raw assessed content. The caller decides how to handle unavailable results.
+The registry uses schema `chat-safety.risks/1` and contains:
 
-For session assessment, supply both `AssessmentScope.MESSAGE` and `AssessmentScope.SESSION`, the trusted history/summary, and session reference/revision in `AssessmentInput`. User, assistant, tool proposal, and tool result summaries can contribute. The same content snapshot can be used for both family and subfamily calls; match fingerprints and revisions before using the responses. A changed draft/history needs a fresh assessment. Session questions evaluate the current trajectory in the provided context; the framework does not maintain a global user risk score or infer a trend solely from a score increase. The chat application persists evidence and actual outcomes with a revision check and owns summary building and retention.
+- `version`: the caller's version identifier for the definition set.
+- `reporting.top_k_families`: a positive integer, defaulting to `3`.
+- `families`: a map of family IDs to descriptions, questions, and optional subfamilies.
+- `limits`: optional context bounds; see [ContextLimits](src/chat_safety/context.py).
 
-The caller uses these signals to steer the agent with its own trusted instructions. A nudge is a mitigation attempt, and the caller can assess the resulting draft at `output_release` before releasing it. Tool execution permissions remain with the caller. Adding families or changing question wording requires application evaluation and calibration; this example registry is deliberately small and does not establish global safety coverage.
+Every family and subfamily requires both `message` and `session` questions. Each question has `instructions`, `true_criteria`, and `false_criteria`. For example, a question can distinguish unapproved disclosure from authorized handling or redaction. Family and subfamily IDs must match `[a-z][a-z0-9_]{0,63}`. New IDs do not require a package release.
 
-## Optional legacy policy gate
+**Jev receives the selected question instructions and criteria, plus the content/context snapshot—not the entire registry or your application policy file.** The adapter maps questions to opaque IDs and maps returned probabilities back to the family, subfamily, and scope. Descriptions are metadata; question wording supplies the model-facing meaning.
 
-The following action-mapping API is retained for callers that explicitly select it. `RiskAssessor` never invokes it. The earlier `synthetic-policy.json` is an action-policy replay fixture; the primary family API uses `risk-registry.json`.
+The loader rejects malformed definitions and duplicate JSON keys. Version and evaluate changes to your questions: a familiar family name does not itself define what the model should measure.
 
-1. The application builds `SafetyInput` from verified identity, current content, bounded recent turns, and a server-produced summary. Never put secrets or unrelated history in the input.
-2. `SafetyGate` checks context limits and hard rules. If they pass, an evaluator returns category signals. Jev is an optional evaluator, configured with application-owned questions.
-3. `PolicyBundle` maps signals to `allow`, `constrain`, `review`, or `refuse`. `shadow` mode records recommendations; `enforce` mode makes them effective. The consuming application must enforce the returned action before model generation or output release.
-4. Missing or invalid evaluator results take a degraded fallback. Low-risk text input is constrained with tools ineligible; high-risk input and tool/output stages are held for review.
-5. An `allow` decision makes a request eligible for normal processing. **It never grants tool permission:** the application must still check actor, scope, resource, arguments, and approvals.
+## Scores, top-N reporting, and subfamily expansion
 
-## Legacy policy inputs and session tracker
+`assess_families` evaluates **all configured families** for every requested scope. `top_k_families` controls reporting, not which families are evaluated:
 
-The trusted caller configures `SafetyGate` with a versioned `PolicyBundle`, hard rules, and an evaluator whose questions it owns. For every check, it passes a `SafetyInput` with deterministic arguments: stage, content or action summary, actor/surface, requested enabled focus categories, assessment scopes, and verified context. The evaluator asks its configured model questions and returns category signals. The gate maps those signals through policy and returns `SafetyDecision.recommended_action` and `effective_action` to the caller. The caller applies the effective action (`allow`, `constrain`, `review`, or `refuse`) in its own workflow. Model output cannot directly grant a tool permission or override a hard rule. Caller-provided focus categories cannot change the configured questions or thresholds.
+- `scores` contains every assessed family/scope score.
+- `top_families` contains up to N ranked families **per scope**.
+- Requesting more families than the registry contains returns all available families.
+- Scores are independent criterion probabilities in `[0, 1]`; they do not sum to one.
+- A low-scoring family may still appear in the top N. Ranking is not a declaration of harm or proof of user intent.
 
-### Caller-owned JSON policy
+Sorting is deterministic for a given set of returned scores. Model inference is not guaranteed to produce identical scores on repeated calls.
 
-The caller may keep a versioned `chat-safety.policy/1` JSON file and load it with `load_policy_json`. [runtime-policy.json](examples/runtime-policy.json) is a **synthetic example**. It defines required and optional category IDs, a description and message/session Jev question for each enabled category, and threshold bands for every stage. `thresholds` apply to the latest event; `session_thresholds` apply to trajectory signals. A band gives `review_at`, `refuse_at`, and the action to return in each triggered band. The loader rejects unknown category IDs, missing definitions, missing stage/category coverage, bad threshold ordering, and duplicate JSON keys before a model call.
-
-`Category` is the legacy action API's fixed identifier registry. Its restriction on new identifiers does not apply to `RiskRegistry`, whose family and subfamily IDs come from caller configuration. Hard rules and tool authorization remain application code, and credentials remain in the caller's secret store.
+Subfamilies require an explicit second call. The caller chooses parents using its own thresholds or other policy:
 
 ```python
-from chat_safety import SafetyGate, load_policy_json
-from chat_safety.adapters.jev import JevEvaluator
-
-configured = load_policy_json("/trusted/config/chat-safety-policy.json")
-evaluator = JevEvaluator(
-    api_key=key_from_secret_store,
-    questions=configured.message_questions,
-    session_questions=configured.session_questions,
-    mandatory_categories=configured.policy.required_categories,
-)
-gate = SafetyGate(configured.policy, evaluator, hard_rules=backend_hard_rules)
-# decision = await gate.evaluate(caller_built_safety_input)
+# Place inside main(), after a complete family assessment in the example above.
+# These thresholds are illustrative, not calibrated recommendations.
+expand_at = {"health": 0.60, "privacy": 0.60}
+selected = tuple(sorted({
+    score.family_id
+    for score in result.scores
+    if score.family_id in expand_at
+    and score.probability >= expand_at[score.family_id]
+}))
+if selected:
+    detail = await assessor.assess_subfamilies(request, family_ids=selected)
+    if detail.status is AssessmentStatus.COMPLETE:
+        assert detail.input_digest == result.input_digest
+        assert detail.registry_digest == result.registry_digest
+        # Apply trusted application policy to detail.scores.
 ```
 
-`SafetyInput.stage` identifies the event: user input, tool proposal, tool result, or assistant output release. `content` is the actual message or a bounded action/result summary. A policy has mandatory and enabled optional categories. `focus_categories` lets a caller add an enabled optional category such as `medical_advice`; it never narrows the mandatory set. A category name alone supplies no threshold or safe interpretation. The consuming product owns Jev question wording and threshold bands. Application sharing and export use backend authorization and privacy rules; they are not Jev stages.
+Inspect all scores when checking thresholds, not only `top_families`. Selected parents must exist and have children. The follow-up evaluates their children across the requested scopes; it does not replace the broad family scores. There are no automatic follow-up calls, nudges, or rewrites.
 
-To assess a conversation trajectory, set `assessment_scopes` to both `MESSAGE` and `SESSION`, and supply a server-owned `session_ref`, revision, bounded recent turns, and a server-produced safety summary. Recent turns may include user, assistant, tool proposal, and tool result events. The Jev adapter asks separately about the latest content and the trajectory in one request; the gate requires complete signals for both scopes and applies their configured thresholds. Missing session questions, thresholds, or signals yield a degraded hold. A benign latest message can therefore be held because the session context is concerning.
+## Session assessment and persistence
 
-```python
-from chat_safety import AssessmentScope, Category, RecentTurn, SafetyInput, Stage
+Message scope evaluates the latest content, with supplied history available for interpretation. Session scope evaluates what the provided sequence collectively enables or is moving toward, including the assistant's contributions. A benign individual message can therefore coexist with a concerning session score.
 
-request = SafetyInput(
-    request_id="opaque-event-id",
-    policy_version="example-policy/1",
-    stage=Stage.INPUT,
-    surface="chat",
-    actor_ref="opaque-actor-id",
-    content="What should I do next?",
-    focus_categories=(Category.MEDICAL_ADVICE,),
-    assessment_scopes=(AssessmentScope.MESSAGE, AssessmentScope.SESSION),
-    session_ref="opaque-session-id",
-    session_revision=7,
-    safety_summary="Server-produced, bounded summary of earlier safety-relevant events.",
-    recent_turns=(
-        RecentTurn("user", "Bounded prior user text"),
-        RecentTurn("assistant", "Bounded prior agent answer"),
-        RecentTurn("tool_result", "Bounded tool-result summary"),
-    ),
-)
+For session assessments:
+
+1. Load a trusted conversation snapshot in your application.
+2. Supply `session_ref` and `session_revision` together, and request `AssessmentScope.SESSION` explicitly. The default scope is message only.
+3. Include relevant `recent_turns` and, if needed, a server-produced `safety_summary`. Supported turn roles are `user`, `assistant`, `tool_proposal`, and `tool_result`.
+4. Persist the returned evidence and the actual application outcome against that revision. Check the revision before using results from asynchronous or concurrent assessments.
+5. Reassess when the content, draft, or history changes.
+
+The library does not fetch history, build summaries, maintain a global user risk score, or calculate longitudinal trends. A session score describes the supplied snapshot; it is not an average of earlier message scores. Applications can compare compatible assessments over time, but must account for changes in questions, models, scopes, and context coverage.
+
+Default bounds include 12,000 characters of latest content, eight recent turns, 3,000 characters per recent turn, and a 2,000-character summary. Oversize input raises `ContextTooLarge` before evaluation; the library never silently truncates it. Configure bounds for your use case and retain coverage metadata when selecting or summarizing history. Missing history cannot be assessed.
+
+The optional legacy `SessionTracker` described below is separate from `RiskAssessor`; it is not an automatic persistence layer for family assessments.
+
+## Application flow: guidance, tools, and output release
+
+A possible integration looks like this. Each application-owned step is implemented by the caller:
+
+```mermaid
+flowchart TD
+    A[Caller supplies content and trusted session snapshot] --> B[Assess families]
+    B --> C{Caller requests detail?}
+    C -->|Yes| D[Assess selected subfamilies]
+    C -->|No| E[Caller applies policy and agent guidance]
+    D --> E
+    E --> F[Agent produces a buffered draft]
+    F --> G[Assess draft at output_release with session context]
+    G --> H[Caller releases, revises and reassesses, or holds]
 ```
 
-`SessionTracker` builds the next assessment from a `SessionSafetyState` and appends a redacted `SessionEvent` after the outcome is known. Events cover user messages, assistant output, tool proposals, and tool results. The state retains a bounded window, content hashes, decisions, outcomes, and a trusted summary. The package defines a `SessionStore` interface; Bahulam must implement durable storage and atomic compare-and-swap on the revision. A past refusal is context, not a permanent user label. Tool permission and exact user approval are separate backend checks. The `medical_advice` category is an experimental contract label for unsafe personalized guidance; it is not a judgment that general medical education or research is disallowed.
+Use trusted application templates for agent guidance. A nudge is a mitigation attempt, not proof that the final answer followed it. If your application must assess text before users see it, buffer the draft and perform an output assessment before streaming. Rewritten drafts need fresh assessments. The package itself provides neither a streaming buffer nor a rewrite loop.
 
-For a session, the caller loads a trusted state, passes the same per-event arguments through `SessionTracker.build_input`, and calls `SafetyGate.evaluate`. The tracker adds bounded history and requests both message and session signals once history exists. The caller enforces the returned action, then appends the **actual** outcome (`accepted`, `held`, `denied`, `executed`, or `released`) and persists the next revision atomically. A review or refusal cannot be recorded as accepted, executed, or released. See the runnable [caller session example](examples/caller_session.py); its scores and thresholds are synthetic. `state_to_record` and `state_from_record` serialize the bounded state without raw message content.
+For tools, assess a bounded proposal or result at the corresponding stage. Independently enforce identity, permissions, argument validation, resource scope, and any required user approval before execution. A low risk score never authorizes a tool call. Tool results and retrieved text remain untrusted content.
 
-`ThresholdBand` numbers in tests are synthetic. Real thresholds require a human-labeled corpus, calibration, a locked test set, and approval by the consuming product's policy owners.
+With the Jev adapter, family questions for all requested scopes are bundled into one HTTP request. A subfamily assessment adds another request; assessing an output draft adds another. Reducing top N alone does not reduce the number of family questions. Your application owns latency budgets, scheduling, retry limits, and behavior when an assessment is unavailable.
 
-## Local checks
+## Result contract and failures
+
+`RiskAssessment.to_dict()` returns a JSON-compatible record with schema `chat-safety.assessment/1`:
+
+| Fields | Purpose |
+| --- | --- |
+| `request_id`, `stage`, `level` | Identify the event and family/subfamily assessment |
+| `registry_version`, `registry_digest`, `input_digest` | Identify the definitions and assessed snapshot |
+| `session_ref`, `session_revision`, `assessment_scopes` | Associate evidence with the correct conversation state |
+| `status`, `error_code` | Distinguish complete evidence from an unavailable evaluation |
+| `scores`, `top_families`, `assessed_family_ids`, `top_k_families` | Carry scores and reporting metadata |
+| `evaluator`, `model_version` | Record the evaluator and returned model snapshot when available |
+
+Provider errors and invalid, duplicate, or missing score coverage return `status="unavailable"`, `error_code="EVALUATION_UNAVAILABLE"`, and empty scores. They do not produce zero-risk scores or an allow/refuse decision. Invalid caller arguments, registry mismatches, and context-limit violations raise before the provider call.
+
+Serialized assessments exclude raw content, but still contain caller-provided identifiers and risk evidence. Apply your own access controls and retention policy. Keep credentials out of assessed content and logs; a content fingerprint is not a substitute for privacy controls.
+
+## Optional legacy action-policy API
+
+The package also retains `SafetyGate` for applications that explicitly want category scores mapped to actions. `RiskAssessor` does not invoke it.
+
+| API | Configuration | Result |
+| --- | --- | --- |
+| `RiskAssessor` | Dynamic `RiskRegistry` families and subfamilies | Evidence only |
+| `SafetyGate` | Fixed `Category` enum and versioned `PolicyBundle` | Recommended/effective `allow`, `constrain`, `review`, or `refuse` |
+
+Use `load_policy_json` with [runtime-policy.json](examples/runtime-policy.json) for the legacy gate. The policy defines required/optional categories, questions, and stage-specific message/session thresholds. `shadow` mode records recommendations; `enforce` mode makes the policy action effective in the returned decision. The caller still enforces that decision. These are legacy API modes, not modes of `RiskAssessor`.
+
+`SessionTracker` supports bounded legacy session state, outcomes, and serialization. `SessionStore` is an interface: applications implement durable storage and atomic compare-and-swap on revisions. See [caller_session.py](examples/caller_session.py) for a complete offline example and [minimal.py](examples/minimal.py) for a basic gate.
+
+## Testing and evaluation
+
+Run the offline suite and examples from the repository root:
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
@@ -140,19 +243,37 @@ PYTHONPATH=src python -m chat_safety.eval_cli \
   --list-decisions --fail-on-mismatch
 ```
 
-The replay command is offline: it reads labels and previously recorded category probabilities, then runs the policy engine. It prints aggregate results, category precision and recall, slice summaries, and optional case IDs without printing case text. The sample policy and scores are **invented**, so a perfect replay score proves only that routing and fallback logic match the fixtures. The chats cover benign and authorized requests, progressive misuse across turns, refusal, supportive responses, tool and output checks, unscanned attachments, and provider failures. The sample thresholds are not approved for production.
+Install the `dev` extra to include HTTP adapter tests. The replay CLI evaluates the **legacy action policy** against recorded synthetic probabilities. It reports aggregate metrics and case IDs without printing case text. Passing replay proves fixture routing and fallback behavior, not model accuracy or real-world safety.
 
-To test Jev itself on the bundled **synthetic** chats, use a dedicated OpenRouter key and an explicit live command:
+An opt-in live Jev test is also available:
 
 ```bash
-export CHAT_SAFETY_OPENROUTER_API_KEY='your-dedicated-test-key'
+# Supply CHAT_SAFETY_OPENROUTER_API_KEY securely in your environment first.
 PYTHONPATH=src python examples/live_jev_eval.py --run-live
 ```
 
-This sends the example chat text to OpenRouter and may incur charges. It refuses to run without the key and synthetic markers, and it prints case IDs, scores, decisions, and the returned model snapshot without printing prompts or the key. Any degraded case makes the command fail because fallback decisions cannot measure Jev accuracy. The questions are experimental. On 2026-10-30, after enabling `typesafe` for the Azure development OpenRouter key, Jev `typesafe/jev-1.14-20261014` returned scores for all 16 model cases: 15 expected actions matched, with the borderline fraud case allowed instead of reviewed. The sample policy had no production calibration; this is a connectivity and smoke-test result. For a real evaluation, keep the labeled corpus outside the public repository, split calibration and locked test sets by scenario family, and record model snapshot and question-set version with every score set.
+This script uses the legacy evaluator and sends bundled synthetic cases directly to OpenRouter; it can incur charges. It requires the explicit flag, a key, and synthetic markers. It prints scores, decisions, and model metadata rather than prompts or credentials. It is not the gateway-configured example above.
 
-To use the HTTP adapter, install the optional `jev` dependency (`pip install '.[jev]'`). The package does not read environment variables or send requests unless the caller constructs and invokes `JevEvaluator` with a key.
+For application evaluation, keep a labeled corpus covering benign research, ambiguous intent, cumulative assistance, tool actions, and output responses. Separate calibration and held-out test scenarios. Measure false positives, missed risks, helpfulness, guidance adherence, provider failures, and latency separately. Record registry/question versions, model snapshots, context coverage, and actual outcomes. Example thresholds and a successful connectivity test do not establish production calibration.
+
+## Source map
+
+| Module | Responsibility |
+| --- | --- |
+| [assessment.py](src/chat_safety/assessment.py) | Evidence contracts, validation, family and subfamily assessment |
+| [registry.py](src/chat_safety/registry.py) | Strict JSON registry loader |
+| [adapters/jev_risk.py](src/chat_safety/adapters/jev_risk.py) | Jev adapter for the family API |
+| [context.py](src/chat_safety/context.py) | Context bounds |
+| [questions.py](src/chat_safety/questions.py) | Provider-neutral binary criteria |
+| [models.py](src/chat_safety/models.py) | Stages, scopes, and legacy action contracts |
+| [config.py](src/chat_safety/config.py), [policy.py](src/chat_safety/policy.py), [engine.py](src/chat_safety/engine.py) | Legacy policy loading and action composition |
+| [session.py](src/chat_safety/session.py) | Legacy session state and storage interface |
+| [evaluation.py](src/chat_safety/evaluation.py) | Legacy offline evaluation metrics |
+
+## Contributing
+
+Include offline tests for behavior changes and examples for public API changes. Keep credentials, private conversations, and deployment-specific configuration out of contributions. Describe changes to question meaning or score interpretation so downstream callers can evaluate them before adoption.
 
 ## License
 
-MIT. Review dependency and provenance records before public publication.
+[MIT](LICENSE).
